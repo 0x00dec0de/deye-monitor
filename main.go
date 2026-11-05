@@ -21,8 +21,8 @@ const defaultNotifyCmd = `notify-send -a "Deye UPS" -u "$EVENT_URGENCY" -i batte
 
 func main() {
 	addr := flag.String("addr", envOr("LISTEN_ADDR", ":8080"), "HTTP listen address")
-	inverter := flag.String("inverter", envOr("INVERTER_ADDR", "192.168.1.232:8899"), "logger host:port")
-	serial := flag.Uint64("serial", envUint("LOGGER_SERIAL", 2983308769), "Solarman logger serial number")
+	inverter := flag.String("inverter", envOr("INVERTER_ADDR", ""), "Solarman logger host:port, e.g. 192.168.1.50:8899 (required)")
+	serial := flag.Uint64("serial", envUint("LOGGER_SERIAL", 0), "Solarman logger serial number, 10 digits from the stick sticker or its web UI (required)")
 	slave := flag.Uint("slave", uint(envUint("MODBUS_SLAVE", 1)), "Modbus slave id")
 	interval := flag.Duration("interval", envDur("POLL_INTERVAL", 10*time.Second), "poll interval")
 	history := flag.Duration("history", envDur("HISTORY", 48*time.Hour), "how much history to keep in memory")
@@ -30,6 +30,10 @@ func main() {
 	notifyCmd := flag.String("notify-cmd", envOr("NOTIFY_CMD", defaultNotifyCmd),
 		"shell command run on grid lost/restored and low battery; gets EVENT_KIND, EVENT_MESSAGE, EVENT_URGENCY, EVENT_TIME in env ('' to disable)")
 	flag.Parse()
+	if *inverter == "" || *serial == 0 {
+		flag.Usage()
+		log.Fatal("both -inverter and -serial are required")
+	}
 
 	client := NewSolarmanClient(*inverter, uint32(*serial), byte(*slave), 8*time.Second)
 	store := NewStore(*dataFile, *history)

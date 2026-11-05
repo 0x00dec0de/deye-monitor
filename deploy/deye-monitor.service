@@ -1,5 +1,5 @@
 # systemd user service: lives in the user session so notify-send can reach the
-# desktop. Install with:
+# desktop. Edit the paths, inverter address and logger serial, then:
 #   cp deploy/deye-monitor.service ~/.config/systemd/user/
 #   systemctl --user daemon-reload && systemctl --user enable --now deye-monitor
 #   loginctl enable-linger $USER   # start at boot, before login
@@ -9,8 +9,8 @@ After=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/Projects/deya_monitoring
-ExecStart=%h/Projects/deya_monitoring/deye-monitor -addr :8080 -inverter 192.168.1.232:8899 -serial 2983308769 -data %h/Projects/deya_monitoring/history.json
+WorkingDirectory=%h/deye-monitor
+ExecStart=%h/deye-monitor/deye-monitor -addr :8080 -inverter 192.168.1.50:8899 -serial 1234567890 -data %h/deye-monitor/history.json
 Restart=always
 RestartSec=5
 
