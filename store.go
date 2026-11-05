@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"sync"
@@ -21,22 +22,31 @@ type Sample struct {
 
 type Event struct {
 	Time    time.Time `json:"time"`
-	Kind    string    `json:"kind"` // grid_lost | grid_restored | state | error | start
+	Kind    string    `json:"kind"` // grid_lost | grid_restored | low_battery | state | start
 	Message string    `json:"message"`
 }
 
+// failuresBeforeDown is how many consecutive failed polls count as a lost
+// connection to the inverter; shorter blips (flaky WiFi on the logger stick)
+// are ignored. Connection problems are shown as a banner, not as events, so
+// they never crowd out the power events.
+const failuresBeforeDown = 3
+
 type Store struct {
-	mu      sync.RWMutex
-	latest  *Status
-	lastErr string
-	lastOK  time.Time
-	samples []Sample
-	events  []Event
-	maxAge  time.Duration
-	maxEv   int
-	path    string
-	dirty   bool
-	onEvent func(Event)
+	mu         sync.RWMutex
+	latest     *Status
+	lastErr    string
+	lastOK     time.Time
+	samples    []Sample
+	events     []Event
+	maxAge     time.Duration
+	maxEv      int // per category
+	failures   int
+	downSince  time.Time
+	gridLostAt time.Time
+	path       string
+	dirty      bool
+	onEvent    func(Event)
 }
 
 type persisted struct {
@@ -50,7 +60,12 @@ func NewStore(path string, maxAge time.Duration) *Store {
 		if b, err := os.ReadFile(path); err == nil {
 			var p persisted
 			if json.Unmarshal(b, &p) == nil {
-				s.samples, s.events = p.Samples, p.Events
+				s.samples = p.Samples
+				for _, e := range p.Events { // drop old-style connection error events
+					if e.Kind != "error" {
+						s.events = append(s.events, e)
+					}
+				}
 				s.trimLocked()
 			}
 		}
@@ -63,6 +78,10 @@ func (s *Store) Update(st *Status) {
 	defer s.mu.Unlock()
 	prev := s.latest
 	s.latest, s.lastErr, s.lastOK, s.dirty = st, "", st.Time, true
+	if s.failures >= failuresBeforeDown {
+		log.Printf("connection to inverter restored after %s", fmtDur(st.Time.Sub(s.downSince)))
+	}
+	s.failures = 0
 	s.samples = append(s.samples, Sample{
 		T: st.Time.Unix(), SOC: st.BatterySOC, Load: st.LoadPowerW,
 		Battery: st.BatteryPowerW, Grid: st.GridPowerW, PV: st.PVPowerW, OnGrid: st.GridConnected,
@@ -74,9 +93,14 @@ func (s *Store) Update(st *Status) {
 		return
 	}
 	if prev.GridConnected && !st.GridConnected {
+		s.gridLostAt = st.Time
 		s.addEventLocked(st.Time, "grid_lost", "grid lost, running on "+st.Source)
 	} else if !prev.GridConnected && st.GridConnected {
-		s.addEventLocked(st.Time, "grid_restored", "grid restored")
+		msg := "grid restored"
+		if !s.gridLostAt.IsZero() {
+			msg += " after " + fmtDur(st.Time.Sub(s.gridLostAt))
+		}
+		s.addEventLocked(st.Time, "grid_restored", msg)
 	}
 	if prev.State != st.State {
 		s.addEventLocked(st.Time, "state", "inverter state: "+prev.StateText+" -> "+st.StateText)
@@ -89,11 +113,26 @@ func (s *Store) Update(st *Status) {
 func (s *Store) Fail(err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.lastErr == "" {
-		s.addEventLocked(time.Now(), "error", "poll failed: "+err.Error())
-		s.dirty = true
-	}
 	s.lastErr = err.Error()
+	s.failures++
+	if s.failures == 1 {
+		s.downSince = time.Now()
+	}
+	if s.failures == failuresBeforeDown {
+		log.Printf("connection to inverter lost: %v", err)
+	}
+}
+
+func fmtDur(d time.Duration) string {
+	d = d.Round(time.Second)
+	if d < time.Minute {
+		return d.String()
+	}
+	d = d.Round(time.Minute)
+	if h := int(d.Hours()); h > 0 {
+		return fmt.Sprintf("%dh %dm", h, int(d.Minutes())%60)
+	}
+	return fmt.Sprintf("%dm", int(d.Minutes()))
 }
 
 func (s *Store) addEventLocked(t time.Time, kind, msg string) {
@@ -118,11 +157,13 @@ func (s *Store) trimLocked() {
 }
 
 type Snapshot struct {
-	Status *Status   `json:"status"`
-	Error  string    `json:"error,omitempty"`
-	LastOK time.Time `json:"last_ok"`
-	Stale  bool      `json:"stale"`
-	Events []Event   `json:"events"`
+	Status    *Status   `json:"status"`
+	Error     string    `json:"error,omitempty"`
+	LastOK    time.Time `json:"last_ok"`
+	Stale     bool      `json:"stale"`
+	ConnDown  bool      `json:"connection_down"`
+	DownSince time.Time `json:"down_since,omitempty"`
+	Events    []Event   `json:"events"`
 }
 
 func (s *Store) Snapshot() Snapshot {
@@ -134,8 +175,12 @@ func (s *Store) Snapshot() Snapshot {
 	for i, j := 0, len(ev)-1; i < j; i, j = i+1, j-1 {
 		ev[i], ev[j] = ev[j], ev[i]
 	}
-	return Snapshot{Status: s.latest, Error: s.lastErr, LastOK: s.lastOK,
+	snap := Snapshot{Status: s.latest, Error: s.lastErr, LastOK: s.lastOK,
 		Stale: time.Since(s.lastOK) > 2*time.Minute, Events: ev}
+	if s.failures >= failuresBeforeDown {
+		snap.ConnDown, snap.DownSince = true, s.downSince
+	}
+	return snap
 }
 
 // History returns samples within the window, thinned to at most maxPoints.

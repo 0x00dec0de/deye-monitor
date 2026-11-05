@@ -71,7 +71,7 @@ svg { width: 100%; height: 190px; display: block; }
 .events { list-style: none; margin: 0; padding: 0; font-size: 14px; max-height: 260px; overflow: auto; }
 .events li { display: flex; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--border); }
 .events time { color: var(--text-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.events .grid_lost, .events .low_battery, .events .error { color: var(--bad); }
+.events .grid_lost, .events .low_battery { color: var(--bad); }
 .events .grid_restored { color: var(--good); }
 .num { font-variant-numeric: tabular-nums; }
 </style>
@@ -157,8 +157,11 @@ async function refresh() {
   const s = snap.status;
   const banner = $('banner');
   if (!s) { banner.textContent = 'No data from inverter yet' + (snap.error ? ': ' + snap.error : ''); banner.style.display = 'block'; return; }
-  if (snap.error || snap.stale) { banner.textContent = (snap.stale ? 'Data is stale. ' : '') + (snap.error ? 'Last poll error: ' + snap.error : ''); banner.style.display = 'block'; }
-  else banner.style.display = 'none';
+  if (snap.connection_down || snap.stale) {
+    const since = new Date(snap.connection_down ? snap.down_since : snap.last_ok);
+    banner.textContent = `Connection to inverter (TCP 8899) lost since ${tfmt(since)} (${hm((Date.now() - since) / 60000)} ago). Showing last known values.` + (snap.error ? ' ' + snap.error : '');
+    banner.style.display = 'block';
+  } else banner.style.display = 'none';
 
   $('meta').textContent = `${s.serial} · ${s.rated_power_w / 1000} kW · updated ${tfmt(s.time)}`;
 
@@ -221,9 +224,10 @@ async function refresh() {
     ['Battery discharged', fmt(s.total_discharge_kwh) + ' kWh'],
     ['Solar', fmt(s.total_pv_kwh) + ' kWh'],
   ]);
-  $('events').innerHTML = snap.events.map(e =>
+  const evHTML = list => list.map(e =>
     `<li class="${e.kind}"><time>${new Date(e.time).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</time><span>${e.message}</span></li>`
   ).join('') || '<li>no events yet</li>';
+  $('events').innerHTML = evHTML(snap.events);
 }
 
 async function refreshCharts() {

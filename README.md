@@ -12,7 +12,7 @@ shows:
 - battery charge settings (float, absorption, shutdown / low / restart SOC)
 - **history charts** (SOC and power) for the last 1h to 48h with off-grid periods shaded
 - energy counters for today and lifetime
-- an **event log** of grid lost / restored, low battery, inverter state changes
+- an **event log** of grid lost / restored (with outage duration), low battery, inverter state changes
 - a **desktop notification** when the grid goes down and when it comes back
 
 The page is embedded in the binary and loads nothing from the internet, so it
@@ -115,7 +115,11 @@ anything else, for example:
 - `web/index.html` is the dashboard, embedded with `go:embed`.
 
 Grid presence comes from the inverter's grid-connected register plus a
-grid-voltage sanity check. The runtime estimate is the usable energy above the
+grid-voltage sanity check. Losing the TCP connection to the logger stick (flaky
+WiFi is common) is deliberately *not* an event: after three consecutive failed
+polls a banner appears at the top of the page with the last known values, and
+it disappears when polling recovers, so the event list only ever contains power
+events. The runtime estimate is the usable energy above the
 inverter's shutdown SOC, assuming a 51.2 V nominal battery and the capacity the
 inverter reports, divided by the present load (or the real discharge power when
 already on battery). It is an estimate, not a BMS value.
