@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deye UPS Monitor</title>
+<style>
+:root {
+  color-scheme: light;
+  --bg: #f4f4f2; --surface: #fcfcfb; --border: #e2e1dc;
+  --text: #0b0b0b; --text-2: #52514e; --text-3: #8a8984;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
+  --good: #008300; --warn: #c98500; --bad: #c62828;
+  --good-bg: #e3f3e3; --warn-bg: #fff1d6; --bad-bg: #fde3e3;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #111110; --surface: #1a1a19; --border: #2d2d2b;
+    --text: #f0efec; --text-2: #c3c2b7; --text-3: #85847d;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+    --good: #4caf50; --warn: #e0a030; --bad: #ef6b6b;
+    --good-bg: #16301a; --warn-bg: #332a12; --bad-bg: #3a1a1a;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.wrap { max-width: 1100px; margin: 0 auto; padding: 16px; }
+header { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+header h1 { font-size: 20px; margin: 0; font-weight: 600; }
+header .meta { color: var(--text-3); font-size: 13px; }
+.banner { display: none; padding: 10px 14px; border-radius: 8px; margin-bottom: 14px; background: var(--bad-bg); color: var(--bad); font-weight: 500; }
+.hero { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 12px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+.card h2 { font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-3); margin: 0 0 8px; }
+.big { font-size: 34px; font-weight: 600; line-height: 1.1; letter-spacing: -.01em; }
+.big small { font-size: 16px; font-weight: 500; color: var(--text-2); margin-left: 4px; }
+.sub { color: var(--text-2); font-size: 13px; margin-top: 6px; }
+.badge { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 999px; font-size: 20px; font-weight: 600; }
+.badge .dot { width: 12px; height: 12px; border-radius: 50%; background: currentColor; }
+.badge.grid { background: var(--good-bg); color: var(--good); }
+.badge.solar { background: var(--warn-bg); color: var(--warn); }
+.badge.battery, .badge.grid\+battery { background: var(--bad-bg); color: var(--bad); }
+.badge.battery .dot { animation: blink 1.2s infinite; }
+@keyframes blink { 50% { opacity: .25; } }
+.soc { height: 10px; border-radius: 5px; background: var(--border); overflow: hidden; margin-top: 10px; }
+.soc > div { height: 100%; background: var(--s3); border-radius: 5px; transition: width .4s; }
+.soc.low > div { background: var(--bad); }
+.grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; margin-bottom: 12px; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+td { padding: 4px 0; border-bottom: 1px solid var(--border); }
+td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+tr:last-child td { border-bottom: 0; }
+.chart-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 4px; }
+.ranges button { background: none; border: 1px solid var(--border); color: var(--text-2); border-radius: 6px; padding: 3px 9px; font-size: 13px; cursor: pointer; }
+.ranges button.on { background: var(--text); color: var(--surface); border-color: var(--text); }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 13px; color: var(--text-2); margin: 4px 0 2px; }
+.legend span::before { content: ""; display: inline-block; width: 12px; height: 3px; border-radius: 2px; margin-right: 6px; vertical-align: middle; background: var(--c); }
+svg { width: 100%; height: 190px; display: block; }
+.tip { position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 6px 9px; font-size: 12px; color: var(--text-2); box-shadow: 0 2px 8px rgba(0,0,0,.12); white-space: nowrap; display: none; z-index: 2; }
+.tip b { color: var(--text); font-variant-numeric: tabular-nums; }
+.chartwrap { position: relative; }
+.events { list-style: none; margin: 0; padding: 0; font-size: 14px; max-height: 260px; overflow: auto; }
+.events li { display: flex; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--border); }
+.events time { color: var(--text-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.events .grid_lost, .events .low_battery, .events .error { color: var(--bad); }
+.events .grid_restored { color: var(--good); }
+.num { font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Deye UPS Monitor</h1>
+    <div class="meta" id="meta">connecting…</div>
+  </header>
+  <div class="banner" id="banner"></div>
+
+  <div class="hero">
+    <div class="card">
+      <h2>Power source</h2>
+      <div id="source" class="badge grid"><span class="dot"></span><span id="sourceText">—</span></div>
+      <div class="sub" id="sourceSub"></div>
+    </div>
+    <div class="card">
+      <h2>Load</h2>
+      <div class="big"><span id="load">—</span><small>W</small></div>
+      <div class="sub" id="loadSub"></div>
+    </div>
+    <div class="card">
+      <h2>Battery</h2>
+      <div class="big"><span id="soc">—</span><small>%</small></div>
+      <div class="soc" id="socBar"><div style="width:0"></div></div>
+      <div class="sub" id="battSub"></div>
+    </div>
+    <div class="card">
+      <h2>Estimated runtime on battery</h2>
+      <div class="big" id="runtime">—</div>
+      <div class="sub" id="runtimeSub"></div>
+    </div>
+  </div>
+
+  <div class="grid3">
+    <div class="card"><h2>Battery</h2><table id="tBatt"></table></div>
+    <div class="card"><h2>Grid</h2><table id="tGrid"></table></div>
+    <div class="card"><h2>Inverter &amp; solar</h2><table id="tInv"></table></div>
+  </div>
+
+  <div class="card" style="margin-bottom:12px">
+    <div class="chart-head">
+      <h2 style="margin:0">Battery charge, %</h2>
+      <div class="ranges" id="ranges">
+        <button data-r="1h">1h</button><button data-r="6h" class="on">6h</button><button data-r="24h">24h</button><button data-r="48h">48h</button>
+      </div>
+    </div>
+    <div class="chartwrap"><svg id="socChart"></svg><div class="tip" id="socTip"></div></div>
+  </div>
+
+  <div class="card" style="margin-bottom:12px">
+    <div class="chart-head"><h2 style="margin:0">Power, W</h2></div>
+    <div class="legend">
+      <span style="--c:var(--s1)">Load</span>
+      <span style="--c:var(--s2)">Battery (+ discharge)</span>
+      <span style="--c:var(--s3)">Grid (+ import)</span>
+      <span style="--c:var(--s4)">Solar</span>
+    </div>
+    <div class="chartwrap"><svg id="pwrChart"></svg><div class="tip" id="pwrTip"></div></div>
+  </div>
+
+  <div class="grid3">
+    <div class="card"><h2>Energy today</h2><table id="tDay"></table></div>
+    <div class="card"><h2>Energy total</h2><table id="tTotal"></table></div>
+    <div class="card"><h2>Events</h2><ul class="events" id="events"></ul></div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const fmt = (v, d = 1) => v == null ? '—' : Number(v).toFixed(d);
+const rows = (el, pairs) => { el.innerHTML = pairs.map(([k, v]) => `<tr><td>${k}</td><td class="num">${v}</td></tr>`).join(''); };
+const hm = m => { if (!m) return '—'; const h = Math.floor(m / 60), mm = Math.round(m % 60); return h ? `${h} h ${mm} min` : `${mm} min`; };
+const tfmt = t => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+let range = '6h';
+
+async function refresh() {
+  let snap;
+  try { snap = await (await fetch('/api/status')).json(); }
+  catch (e) { $('banner').textContent = 'Monitor server unreachable'; $('banner').style.display = 'block'; return; }
+  const s = snap.status;
+  const banner = $('banner');
+  if (!s) { banner.textContent = 'No data from inverter yet' + (snap.error ? ': ' + snap.error : ''); banner.style.display = 'block'; return; }
+  if (snap.error || snap.stale) { banner.textContent = (snap.stale ? 'Data is stale. ' : '') + (snap.error ? 'Last poll error: ' + snap.error : ''); banner.style.display = 'block'; }
+  else banner.style.display = 'none';
+
+  $('meta').textContent = `${s.serial} · ${s.rated_power_w / 1000} kW · updated ${tfmt(s.time)}`;
+
+  const src = $('source'); src.className = 'badge ' + s.source;
+  const names = { grid: 'ON GRID', battery: 'ON BATTERY', solar: 'SOLAR', 'grid+battery': 'GRID + BATTERY' };
+  $('sourceText').textContent = names[s.source] || s.source.toUpperCase();
+  $('sourceSub').textContent = s.grid_connected ? `grid ${fmt(s.grid_voltage)} V, ${fmt(s.grid_frequency, 2)} Hz` : 'grid is down';
+
+  $('load').textContent = s.load_power_w;
+  $('loadSub').textContent = `${fmt(s.load_voltage)} V output · inverter ${s.inverter_power_w} W`;
+
+  $('soc').textContent = s.battery_soc;
+  const bar = $('socBar'); bar.firstElementChild.style.width = s.battery_soc + '%';
+  bar.classList.toggle('low', s.battery_soc <= s.settings.low_soc);
+  const bp = s.battery_power_w;
+  $('battSub').textContent = bp < -20 ? `charging ${-bp} W` : bp > 20 ? `discharging ${bp} W` : 'idle';
+
+  $('runtime').textContent = hm(s.runtime_minutes);
+  $('runtimeSub').textContent = s.battery_capacity_ah
+    ? `${fmt(s.usable_energy_kwh, 1)} kWh usable above ${s.settings.shutdown_soc}% at ${s.battery_power_w > 50 ? s.battery_power_w : s.load_power_w} W`
+    : 'battery capacity unknown';
+
+  rows($('tBatt'), [
+    ['Voltage', fmt(s.battery_voltage, 2) + ' V'],
+    ['Current', fmt(s.battery_current, 2) + ' A'],
+    ['Power', s.battery_power_w + ' W'],
+    ['Temperature', fmt(s.battery_temp) + ' °C'],
+    ['Capacity', `${s.battery_capacity_ah} Ah (${fmt(s.battery_energy_kwh)} kWh)`],
+    ['Float / absorption', `${fmt(s.settings.float_v, 2)} / ${fmt(s.settings.absorption_v, 2)} V`],
+    ['Shutdown / low / restart SOC', `${s.settings.shutdown_soc} / ${s.settings.low_soc} / ${s.settings.restart_soc} %`],
+  ]);
+  rows($('tGrid'), [
+    ['Status', s.grid_connected ? 'connected' : 'disconnected'],
+    ['Voltage', fmt(s.grid_voltage) + ' V'],
+    ['Frequency', fmt(s.grid_frequency, 2) + ' Hz'],
+    ['Current', fmt(s.grid_current, 2) + ' A'],
+    ['Power', `${s.grid_power_w} W ${s.grid_power_w < 0 ? '(export)' : '(import)'}`],
+  ]);
+  rows($('tInv'), [
+    ['State', s.state_text + (s.faults ? ' ⚠ faults ' + s.faults.join(',') : '')],
+    ['Output frequency', fmt(s.inverter_frequency, 2) + ' Hz'],
+    ['DC / AC temperature', `${fmt(s.temp_dc)} / ${fmt(s.temp_ac)} °C`],
+    ['Solar power', s.pv_power_w + ' W'],
+    ['PV1', `${fmt(s.pv1_voltage)} V · ${fmt(s.pv1_current)} A · ${s.pv1_power_w} W`],
+    ['PV2', `${fmt(s.pv2_voltage)} V · ${fmt(s.pv2_current)} A · ${s.pv2_power_w} W`],
+  ]);
+  rows($('tDay'), [
+    ['Load consumption', fmt(s.daily_load_kwh) + ' kWh'],
+    ['Grid import', fmt(s.daily_grid_buy_kwh) + ' kWh'],
+    ['Grid export', fmt(s.daily_grid_sell_kwh) + ' kWh'],
+    ['Battery charged', fmt(s.daily_charge_kwh) + ' kWh'],
+    ['Battery discharged', fmt(s.daily_discharge_kwh) + ' kWh'],
+    ['Solar', fmt(s.daily_pv_kwh) + ' kWh'],
+  ]);
+  rows($('tTotal'), [
+    ['Load consumption', fmt(s.total_load_kwh) + ' kWh'],
+    ['Grid import', fmt(s.total_grid_buy_kwh) + ' kWh'],
+    ['Grid export', fmt(s.total_grid_sell_kwh) + ' kWh'],
+    ['Battery charged', fmt(s.total_charge_kwh) + ' kWh'],
+    ['Battery discharged', fmt(s.total_discharge_kwh) + ' kWh'],
+    ['Solar', fmt(s.total_pv_kwh) + ' kWh'],
+  ]);
+  $('events').innerHTML = snap.events.map(e =>
+    `<li class="${e.kind}"><time>${new Date(e.time).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</time><span>${e.message}</span></li>`
+  ).join('') || '<li>no events yet</li>';
+}
+
+async function refreshCharts() {
+  let data;
+  try { data = await (await fetch('/api/history?range=' + range)).json(); } catch (e) { return; }
+  drawChart($('socChart'), $('socTip'), data, [{ key: 'soc', name: 'SOC', color: 'var(--s1)', unit: '%' }], { min: 0, max: 100 });
+  drawChart($('pwrChart'), $('pwrTip'), data, [
+    { key: 'load', name: 'Load', color: 'var(--s1)', unit: ' W' },
+    { key: 'bat', name: 'Battery', color: 'var(--s2)', unit: ' W' },
+    { key: 'grid', name: 'Grid', color: 'var(--s3)', unit: ' W' },
+    { key: 'pv', name: 'Solar', color: 'var(--s4)', unit: ' W' },
+  ], {});
+}
+
+function drawChart(svg, tip, data, series, opt) {
+  const W = svg.clientWidth || 800, H = 190, padL = 44, padR = 10, padT = 10, padB = 24;
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  if (!data || data.length < 2) { svg.innerHTML = `<text x="${W / 2}" y="${H / 2}" text-anchor="middle" fill="var(--text-3)" font-size="13">collecting data…</text>`; return; }
+  const t0 = data[0].t, t1 = data[data.length - 1].t;
+  let lo = opt.min ?? Infinity, hi = opt.max ?? -Infinity;
+  if (opt.min == null) for (const d of data) for (const s of series) { lo = Math.min(lo, d[s.key]); hi = Math.max(hi, d[s.key]); }
+  let step = (hi - lo) / 4;
+  if (opt.min == null) {
+    lo = Math.min(lo, 0); hi = Math.max(hi, 10);
+    const raw = (hi - lo) / 4, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    step = [1, 2, 5, 10].map(m => m * mag).find(st => raw / st <= 1.2) || 10 * mag;
+    lo = Math.floor(lo / step) * step; hi = Math.ceil(hi / step) * step;
+  }
+  const ticks = Math.round((hi - lo) / step);
+  const x = t => padL + (t - t0) / Math.max(1, t1 - t0) * (W - padL - padR);
+  const y = v => padT + (hi - v) / (hi - lo) * (H - padT - padB);
+  let out = '';
+  // grid lines + y labels
+  for (let i = 0; i <= ticks; i++) {
+    const v = lo + step * i;
+    out += `<line x1="${padL}" x2="${W - padR}" y1="${y(v)}" y2="${y(v)}" stroke="var(--border)" stroke-width="1"/>`;
+    out += `<text x="${padL - 6}" y="${y(v) + 4}" text-anchor="end" font-size="11" fill="var(--text-3)">${Math.round(v)}</text>`;
+  }
+  if (lo < 0 && hi > 0) out += `<line x1="${padL}" x2="${W - padR}" y1="${y(0)}" y2="${y(0)}" stroke="var(--text-3)" stroke-width="1"/>`;
+  // off-grid shading
+  let start = null;
+  data.forEach((d, i) => {
+    if (!d.on_grid && start == null) start = d.t;
+    if ((d.on_grid || i === data.length - 1) && start != null) { out += `<rect x="${x(start)}" y="${padT}" width="${Math.max(2, x(d.t) - x(start))}" height="${H - padT - padB}" fill="var(--bad)" opacity=".12"/>`; start = null; }
+  });
+  // x labels
+  for (let i = 0; i <= 4; i++) {
+    const t = t0 + (t1 - t0) * i / 4;
+    out += `<text x="${x(t)}" y="${H - 6}" text-anchor="${i === 0 ? 'start' : i === 4 ? 'end' : 'middle'}" font-size="11" fill="var(--text-3)">${tfmt(t * 1000)}</text>`;
+  }
+  for (const s of series) {
+    const d = data.map((p, i) => (i ? 'L' : 'M') + x(p.t).toFixed(1) + ' ' + y(p[s.key]).toFixed(1)).join('');
+    out += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round"/>`;
+  }
+  out += `<line id="cross" x1="0" x2="0" y1="${padT}" y2="${H - padB}" stroke="var(--text-3)" stroke-width="1" style="display:none"/>`;
+  svg.innerHTML = out;
+  const cross = svg.querySelector('#cross');
+  svg.onmousemove = ev => {
+    const r = svg.getBoundingClientRect();
+    const t = t0 + (ev.clientX - r.left - padL) / (W - padL - padR) * (t1 - t0);
+    let best = data[0];
+    for (const d of data) if (Math.abs(d.t - t) < Math.abs(best.t - t)) best = d;
+    cross.style.display = ''; cross.setAttribute('x1', x(best.t)); cross.setAttribute('x2', x(best.t));
+    tip.style.display = 'block';
+    tip.innerHTML = `${tfmt(best.t * 1000)}${best.on_grid ? '' : ' · off grid'}<br>` + series.map(s => `${s.name} <b>${best[s.key]}${s.unit}</b>`).join('<br>');
+    const left = ev.clientX - r.left + 14;
+    tip.style.left = Math.min(left, r.width - tip.offsetWidth - 4) + 'px';
+    tip.style.top = (ev.clientY - r.top - 10) + 'px';
+  };
+  svg.onmouseleave = () => { tip.style.display = 'none'; cross.style.display = 'none'; };
+}
+
+$('ranges').onclick = ev => {
+  if (ev.target.tagName !== 'BUTTON') return;
+  range = ev.target.dataset.r;
+  for (const b of $('ranges').children) b.classList.toggle('on', b === ev.target);
+  refreshCharts();
+};
+refresh(); refreshCharts();
+setInterval(refresh, 5000);
+setInterval(refreshCharts, 30000);
+window.addEventListener('resize', refreshCharts);
+</script>
+</body>
+</html>
