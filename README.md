@@ -18,6 +18,8 @@ shows:
 The page is embedded in the binary and loads nothing from the internet, so it
 keeps working during an outage. JSON endpoints are available for other tools.
 
+![Dashboard screenshot](docs/screenshot.png)
+
 ## Supported hardware
 
 Tested with a Deye SUN-6K-SG03LP1 (single-phase hybrid) behind a Solarman
