@@ -190,7 +190,14 @@ async function refresh() {
   const bar = $('socBar'); bar.firstElementChild.style.width = s.battery_soc + '%';
   bar.classList.toggle('low', s.battery_soc <= s.settings.low_soc);
   const bp = s.battery_power_w;
-  $('battSub').textContent = bp < -20 ? `charging ${-bp} W` : bp > 20 ? `discharging ${bp} W` : 'idle';
+  let battSub = bp < -20 ? `charging ${-bp} W` : bp > 20 ? `discharging ${bp} W` : 'idle';
+  if (bp < -50 && s.battery_soc < 100 && s.battery_capacity_ah) {
+    // energy still missing at the current charge power; charging tapers near
+    // full, so this is a lower bound
+    const toGo = s.battery_energy_kwh * (100 - s.battery_soc) / 100;
+    battSub += ` · full in ~${hm(toGo * 1000 / -bp * 60)} (${fmt(toGo)} kWh to go)`;
+  }
+  $('battSub').textContent = battSub;
 
   // While on battery, base the estimate on the average draw since the grid was
   // lost (steadier than the instantaneous load) once there are 2+ minutes of data.

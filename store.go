@@ -105,7 +105,11 @@ func (s *Store) Update(st *Status) {
 		s.addEventLocked(st.Time, "grid_lost", "grid lost, running on "+st.Source)
 	} else if !prev.GridConnected && st.GridConnected {
 		msg := "grid restored"
-		if !s.gridLostAt.IsZero() {
+		// the just-appended sample is on grid, so outageLocked finds the
+		// stretch that ended now, even if the monitor restarted during it
+		if o := s.outageLocked(); o != nil && !o.Ongoing {
+			msg += " after " + fmtDur(st.Time.Sub(o.Since))
+		} else if !s.gridLostAt.IsZero() {
 			msg += " after " + fmtDur(st.Time.Sub(s.gridLostAt))
 		}
 		s.addEventLocked(st.Time, "grid_restored", msg)
