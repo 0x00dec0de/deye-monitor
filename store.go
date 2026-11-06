@@ -156,6 +156,58 @@ func (s *Store) trimLocked() {
 	s.samples = s.samples[i:]
 }
 
+// Outage describes the current (or, when on grid, the most recent) stretch of
+// running without the grid, derived from the stored samples.
+type Outage struct {
+	Since         time.Time  `json:"since"`
+	Until         *time.Time `json:"until,omitempty"` // nil while ongoing
+	Ongoing       bool       `json:"ongoing"`
+	DurationS     int64      `json:"duration_s"`
+	AvgDischargeW int        `json:"avg_discharge_w"` // time-weighted mean of battery discharge
+	EnergyKWh     float64    `json:"energy_kwh"`      // energy drawn from the battery
+}
+
+// outageLocked scans the samples backwards for the last off-grid stretch.
+func (s *Store) outageLocked() *Outage {
+	n := len(s.samples)
+	end := n - 1
+	for end >= 0 && s.samples[end].OnGrid {
+		end--
+	}
+	if end < 0 {
+		return nil
+	}
+	start := end
+	for start > 0 && !s.samples[start-1].OnGrid {
+		start--
+	}
+	o := &Outage{Since: time.Unix(s.samples[start].T, 0), Ongoing: end == n-1}
+	var sum, dur float64
+	for i := start + 1; i <= end; i++ {
+		dt := float64(s.samples[i].T - s.samples[i-1].T)
+		if dt > 300 { // monitor was down: do not count the gap as discharge time
+			dt = 0
+		}
+		v := float64(s.samples[i-1].Battery+s.samples[i].Battery) / 2
+		if v > 0 {
+			sum += v * dt
+			dur += dt
+		}
+	}
+	last := time.Unix(s.samples[end].T, 0)
+	if o.Ongoing {
+		last = time.Now()
+	} else {
+		o.Until = &last
+	}
+	o.DurationS = int64(last.Sub(o.Since).Seconds())
+	if dur > 0 {
+		o.AvgDischargeW = int(sum / dur)
+	}
+	o.EnergyKWh = sum / 3600 / 1000
+	return o
+}
+
 type Snapshot struct {
 	Status    *Status   `json:"status"`
 	Error     string    `json:"error,omitempty"`
@@ -163,6 +215,7 @@ type Snapshot struct {
 	Stale     bool      `json:"stale"`
 	ConnDown  bool      `json:"connection_down"`
 	DownSince time.Time `json:"down_since,omitempty"`
+	Outage    *Outage   `json:"outage,omitempty"`
 	Events    []Event   `json:"events"`
 }
 
@@ -180,6 +233,7 @@ func (s *Store) Snapshot() Snapshot {
 	if s.failures >= failuresBeforeDown {
 		snap.ConnDown, snap.DownSince = true, s.downSince
 	}
+	snap.Outage = s.outageLocked()
 	return snap
 }
 

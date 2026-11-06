@@ -63,7 +63,7 @@ tr:last-child td { border-bottom: 0; }
 .ranges button { background: none; border: 1px solid var(--border); color: var(--text-2); border-radius: 6px; padding: 3px 9px; font-size: 13px; cursor: pointer; }
 .ranges button.on { background: var(--text); color: var(--surface); border-color: var(--text); }
 .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 13px; color: var(--text-2); margin: 4px 0 2px; }
-.legend span::before { content: ""; display: inline-block; width: 12px; height: 3px; border-radius: 2px; margin-right: 6px; vertical-align: middle; background: var(--c); }
+.legend > span::before { content: ""; display: inline-block; width: 12px; height: 3px; border-radius: 2px; margin-right: 6px; vertical-align: middle; background: var(--c); }
 svg { width: 100%; height: 190px; display: block; }
 .tip { position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 6px 9px; font-size: 12px; color: var(--text-2); box-shadow: 0 2px 8px rgba(0,0,0,.12); white-space: nowrap; display: none; z-index: 2; }
 .tip b { color: var(--text); font-variant-numeric: tabular-nums; }
@@ -128,7 +128,7 @@ svg { width: 100%; height: 190px; display: block; }
     <div class="chart-head"><h2 style="margin:0">Power, W</h2></div>
     <div class="legend">
       <span style="--c:var(--s1)">Load</span>
-      <span style="--c:var(--s2)">Battery (+ discharge)</span>
+      <span style="--c:var(--s2)">Battery (+ discharge)<em id="batAvg" style="font-style:normal"></em></span>
       <span style="--c:var(--s3)">Grid (+ import)</span>
       <span style="--c:var(--s4)">Solar</span>
     </div>
@@ -148,13 +148,14 @@ const fmt = (v, d = 1) => v == null ? '—' : Number(v).toFixed(d);
 const rows = (el, pairs) => { el.innerHTML = pairs.map(([k, v]) => `<tr><td>${k}</td><td class="num">${v}</td></tr>`).join(''); };
 const hm = m => { if (!m) return '—'; const h = Math.floor(m / 60), mm = Math.round(m % 60); return h ? `${h} h ${mm} min` : `${mm} min`; };
 const tfmt = t => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-let range = '6h';
+let range = '6h', lastSnap = null;
 
 async function refresh() {
   let snap;
   try { snap = await (await fetch('/api/status')).json(); }
   catch (e) { $('banner').textContent = 'Monitor server unreachable'; $('banner').style.display = 'block'; return; }
   const s = snap.status;
+  lastSnap = snap;
   const banner = $('banner');
   if (!s) { banner.textContent = 'No data from inverter yet' + (snap.error ? ': ' + snap.error : ''); banner.style.display = 'block'; return; }
   if (snap.connection_down || snap.stale) {
@@ -168,7 +169,14 @@ async function refresh() {
   const src = $('source'); src.className = 'badge ' + s.source;
   const names = { grid: 'ON GRID', battery: 'ON BATTERY', solar: 'SOLAR', 'grid+battery': 'GRID + BATTERY' };
   $('sourceText').textContent = names[s.source] || s.source.toUpperCase();
-  $('sourceSub').textContent = s.grid_connected ? `grid ${fmt(s.grid_voltage)} V, ${fmt(s.grid_frequency, 2)} Hz` : 'grid is down';
+  const o = snap.outage;
+  const dfmt = t => new Date(t).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  if (!s.grid_connected && o && o.ongoing)
+    $('sourceSub').textContent = `grid lost ${tfmt(o.since)}, ${hm(o.duration_s / 60)} ago · avg draw ${o.avg_discharge_w} W · ${fmt(o.energy_kwh)} kWh used`;
+  else if (s.grid_connected && o)
+    $('sourceSub').textContent = `grid ${fmt(s.grid_voltage)} V, ${fmt(s.grid_frequency, 2)} Hz · last outage ${dfmt(o.since)}, ${hm(o.duration_s / 60)}, avg ${o.avg_discharge_w} W, ${fmt(o.energy_kwh)} kWh`;
+  else
+    $('sourceSub').textContent = s.grid_connected ? `grid ${fmt(s.grid_voltage)} V, ${fmt(s.grid_frequency, 2)} Hz` : 'grid is down';
 
   $('load').textContent = s.load_power_w;
   $('loadSub').textContent = `${fmt(s.load_voltage)} V output · inverter ${s.inverter_power_w} W`;
@@ -179,9 +187,14 @@ async function refresh() {
   const bp = s.battery_power_w;
   $('battSub').textContent = bp < -20 ? `charging ${-bp} W` : bp > 20 ? `discharging ${bp} W` : 'idle';
 
-  $('runtime').textContent = hm(s.runtime_minutes);
+  // While on battery, base the estimate on the average draw since the grid was
+  // lost (steadier than the instantaneous load) once there are 2+ minutes of data.
+  const useAvg = !s.grid_connected && o && o.ongoing && o.duration_s >= 120 && o.avg_discharge_w > 0;
+  const minutes = useAvg ? s.usable_energy_kwh * 1000 / o.avg_discharge_w * 60 : s.runtime_minutes;
+  $('runtime').textContent = hm(minutes);
   $('runtimeSub').textContent = s.battery_capacity_ah
-    ? `${fmt(s.usable_energy_kwh, 1)} kWh usable above ${s.settings.shutdown_soc}% at ${s.battery_power_w > 50 ? s.battery_power_w : s.load_power_w} W`
+    ? `${fmt(s.usable_energy_kwh, 1)} kWh usable above ${s.settings.shutdown_soc}% at ` +
+      (useAvg ? `avg ${o.avg_discharge_w} W since grid lost` : `${s.battery_power_w > 50 ? s.battery_power_w : s.load_power_w} W`)
     : 'battery capacity unknown';
 
   rows($('tBatt'), [
@@ -234,12 +247,15 @@ async function refreshCharts() {
   let data;
   try { data = await (await fetch('/api/history?range=' + range)).json(); } catch (e) { return; }
   drawChart($('socChart'), $('socTip'), data, [{ key: 'soc', name: 'SOC', color: 'var(--s1)', unit: '%' }], { min: 0, max: 100 });
-  drawChart($('pwrChart'), $('pwrTip'), data, [
+  const pwr = [
     { key: 'load', name: 'Load', color: 'var(--s1)', unit: ' W' },
-    { key: 'bat', name: 'Battery', color: 'var(--s2)', unit: ' W' },
+    { key: 'bat', name: 'Battery', color: 'var(--s2)', unit: ' W', avg: lastSnap && lastSnap.outage },
     { key: 'grid', name: 'Grid', color: 'var(--s3)', unit: ' W' },
     { key: 'pv', name: 'Solar', color: 'var(--s4)', unit: ' W' },
-  ], {});
+  ];
+  drawChart($('pwrChart'), $('pwrTip'), data, pwr, {});
+  const o = lastSnap && lastSnap.outage;
+  $('batAvg').textContent = o && o.avg_discharge_w > 0 ? ` · avg ${o.avg_discharge_w} W since grid lost ${tfmt(o.since)}${o.ongoing ? '' : ' (last outage)'}` : '';
 }
 
 function drawChart(svg, tip, data, series, opt) {
@@ -247,6 +263,8 @@ function drawChart(svg, tip, data, series, opt) {
   svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
   if (!data || data.length < 2) { svg.innerHTML = `<text x="${W / 2}" y="${H / 2}" text-anchor="middle" fill="var(--text-3)" font-size="13">collecting data…</text>`; return; }
   const t0 = data[0].t, t1 = data[data.length - 1].t;
+  // typical spacing between samples; anything over 5x that is a gap
+  const spacing = (t1 - t0) / (data.length - 1), gap = Math.max(60, spacing * 5);
   let lo = opt.min ?? Infinity, hi = opt.max ?? -Infinity;
   if (opt.min == null) for (const d of data) for (const s of series) { lo = Math.min(lo, d[s.key]); hi = Math.max(hi, d[s.key]); }
   let step = (hi - lo) / 4;
@@ -279,8 +297,18 @@ function drawChart(svg, tip, data, series, opt) {
     out += `<text x="${x(t)}" y="${H - 6}" text-anchor="${i === 0 ? 'start' : i === 4 ? 'end' : 'middle'}" font-size="11" fill="var(--text-3)">${tfmt(t * 1000)}</text>`;
   }
   for (const s of series) {
-    const d = data.map((p, i) => (i ? 'L' : 'M') + x(p.t).toFixed(1) + ' ' + y(p[s.key]).toFixed(1)).join('');
+    // break the line where samples are missing (monitor or network was down)
+    const d = data.map((p, i) => (i && p.t - data[i - 1].t <= gap ? 'L' : 'M') + x(p.t).toFixed(1) + ' ' + y(p[s.key]).toFixed(1)).join('');
     out += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round"/>`;
+    if (s.avg && s.avg.avg_discharge_w > 0) {
+      // dashed average-discharge line spanning the (last) grid outage
+      const o = s.avg, a = Math.max(t0, new Date(o.since) / 1000), b = Math.min(t1, o.until ? new Date(o.until) / 1000 : t1);
+      if (b > a) {
+        const ya = Math.min(Math.max(y(o.avg_discharge_w), padT), H - padB);
+        out += `<line x1="${x(a)}" x2="${x(b)}" y1="${ya}" y2="${ya}" stroke="${s.color}" stroke-width="1.5" stroke-dasharray="6 4"/>`;
+        out += `<text x="${x(b) - 4}" y="${ya - 5}" text-anchor="end" font-size="11" fill="${s.color}" paint-order="stroke" stroke="var(--surface)" stroke-width="3">avg ${o.avg_discharge_w}${s.unit} since grid lost</text>`;
+      }
+    }
   }
   out += `<line id="cross" x1="0" x2="0" y1="${padT}" y2="${H - padB}" stroke="var(--text-3)" stroke-width="1" style="display:none"/>`;
   svg.innerHTML = out;
@@ -306,7 +334,7 @@ $('ranges').onclick = ev => {
   for (const b of $('ranges').children) b.classList.toggle('on', b === ev.target);
   refreshCharts();
 };
-refresh(); refreshCharts();
+refresh().then(refreshCharts);
 setInterval(refresh, 5000);
 setInterval(refreshCharts, 30000);
 window.addEventListener('resize', refreshCharts);

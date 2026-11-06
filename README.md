@@ -7,7 +7,8 @@ shows:
 
 - current **power source**: grid, battery, solar, or grid + battery
 - load power, battery state of charge, voltage, current, temperature
-- **estimated runtime on battery** at the present load
+- **estimated runtime on battery**, based on the average draw since the grid was lost
+- **outage statistics**: when the grid was lost, for how long, average battery draw and energy used (also for the last outage once the grid is back)
 - grid voltage / frequency / import-export power, PV string readings, inverter temperatures
 - battery charge settings (float, absorption, shutdown / low / restart SOC)
 - **history charts** (SOC and power) for the last 1h to 48h with off-grid periods shaded
@@ -121,8 +122,10 @@ polls a banner appears at the top of the page with the last known values, and
 it disappears when polling recovers, so the event list only ever contains power
 events. The runtime estimate is the usable energy above the
 inverter's shutdown SOC, assuming a 51.2 V nominal battery and the capacity the
-inverter reports, divided by the present load (or the real discharge power when
-already on battery). It is an estimate, not a BMS value.
+inverter reports, divided by the present load. While on battery it switches to
+the time-weighted average discharge since the grid was lost (derived from the
+stored samples), which is steadier than the instantaneous load. It is an
+estimate, not a BMS value.
 
 The logger stick's own web UI shows nonsense energy totals for these inverters;
 all values here come from the Modbus registers.
