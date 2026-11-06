@@ -184,7 +184,7 @@ async function refresh() {
   const avgParts = [];
   if (!s.grid_connected && o && o.ongoing && o.avg_load_w) avgParts.push(`avg ${o.avg_load_w} W since grid lost`);
   if (snap.avg_load_24h_w) avgParts.push(`avg ${snap.avg_load_24h_w} W over 24h`);
-  $('loadAvg').textContent = avgParts.join(' · ');
+  $('loadAvg').innerHTML = avgParts.join('<br>');
 
   $('soc').textContent = s.battery_soc;
   const bar = $('socBar'); bar.firstElementChild.style.width = s.battery_soc + '%';
