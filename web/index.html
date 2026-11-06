@@ -94,6 +94,7 @@ svg { width: 100%; height: 190px; display: block; }
       <h2>Load</h2>
       <div class="big"><span id="load">—</span><small>W</small></div>
       <div class="sub" id="loadSub"></div>
+      <div class="sub" id="loadAvg"></div>
     </div>
     <div class="card">
       <h2>Battery</h2>
@@ -156,6 +157,7 @@ async function refresh() {
   catch (e) { $('banner').textContent = 'Monitor server unreachable'; $('banner').style.display = 'block'; return; }
   const s = snap.status;
   lastSnap = snap;
+  const o = snap.outage;
   const banner = $('banner');
   if (!s) { banner.textContent = 'No data from inverter yet' + (snap.error ? ': ' + snap.error : ''); banner.style.display = 'block'; return; }
   if (snap.connection_down || snap.stale) {
@@ -169,7 +171,6 @@ async function refresh() {
   const src = $('source'); src.className = 'badge ' + s.source;
   const names = { grid: 'ON GRID', battery: 'ON BATTERY', solar: 'SOLAR', 'grid+battery': 'GRID + BATTERY' };
   $('sourceText').textContent = names[s.source] || s.source.toUpperCase();
-  const o = snap.outage;
   const dfmt = t => new Date(t).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   if (!s.grid_connected && o && o.ongoing)
     $('sourceSub').textContent = `grid lost ${tfmt(o.since)}, ${hm(o.duration_s / 60)} ago · avg draw ${o.avg_discharge_w} W · ${fmt(o.energy_kwh)} kWh used`;
@@ -180,6 +181,10 @@ async function refresh() {
 
   $('load').textContent = s.load_power_w;
   $('loadSub').textContent = `${fmt(s.load_voltage)} V output · inverter ${s.inverter_power_w} W`;
+  const avgParts = [];
+  if (!s.grid_connected && o && o.ongoing && o.avg_load_w) avgParts.push(`avg ${o.avg_load_w} W since grid lost`);
+  if (snap.avg_load_24h_w) avgParts.push(`avg ${snap.avg_load_24h_w} W over 24h`);
+  $('loadAvg').textContent = avgParts.join(' · ');
 
   $('soc').textContent = s.battery_soc;
   const bar = $('socBar'); bar.firstElementChild.style.width = s.battery_soc + '%';

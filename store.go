@@ -164,7 +164,26 @@ type Outage struct {
 	Ongoing       bool       `json:"ongoing"`
 	DurationS     int64      `json:"duration_s"`
 	AvgDischargeW int        `json:"avg_discharge_w"` // time-weighted mean of battery discharge
+	AvgLoadW      int        `json:"avg_load_w"`      // time-weighted mean of the load
 	EnergyKWh     float64    `json:"energy_kwh"`      // energy drawn from the battery
+}
+
+// avgLoadLocked is the time-weighted mean load over samples[from..to],
+// ignoring gaps where the monitor was not running.
+func (s *Store) avgLoadLocked(from, to int) int {
+	var sum, dur float64
+	for i := from + 1; i <= to; i++ {
+		dt := float64(s.samples[i].T - s.samples[i-1].T)
+		if dt > 300 {
+			continue
+		}
+		sum += float64(s.samples[i-1].Load+s.samples[i].Load) / 2 * dt
+		dur += dt
+	}
+	if dur == 0 {
+		return 0
+	}
+	return int(sum / dur)
 }
 
 // outageLocked scans the samples backwards for the last off-grid stretch.
@@ -204,6 +223,7 @@ func (s *Store) outageLocked() *Outage {
 	if dur > 0 {
 		o.AvgDischargeW = int(sum / dur)
 	}
+	o.AvgLoadW = s.avgLoadLocked(start, end)
 	o.EnergyKWh = sum / 3600 / 1000
 	return o
 }
@@ -216,6 +236,7 @@ type Snapshot struct {
 	ConnDown  bool      `json:"connection_down"`
 	DownSince time.Time `json:"down_since,omitempty"`
 	Outage    *Outage   `json:"outage,omitempty"`
+	AvgLoad24 int       `json:"avg_load_24h_w"`
 	Events    []Event   `json:"events"`
 }
 
@@ -234,6 +255,14 @@ func (s *Store) Snapshot() Snapshot {
 		snap.ConnDown, snap.DownSince = true, s.downSince
 	}
 	snap.Outage = s.outageLocked()
+	if n := len(s.samples); n > 1 {
+		cut := time.Now().Add(-24 * time.Hour).Unix()
+		from := n - 1
+		for from > 0 && s.samples[from-1].T >= cut {
+			from--
+		}
+		snap.AvgLoad24 = s.avgLoadLocked(from, n-1)
+	}
 	return snap
 }
 
