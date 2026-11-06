@@ -77,6 +77,10 @@ func (s *Store) Update(st *Status) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	prev := s.latest
+	var lastSample time.Time
+	if n := len(s.samples); n > 0 {
+		lastSample = time.Unix(s.samples[n-1].T, 0)
+	}
 	s.latest, s.lastErr, s.lastOK, s.dirty = st, "", st.Time, true
 	if s.failures >= failuresBeforeDown {
 		log.Printf("connection to inverter restored after %s", fmtDur(st.Time.Sub(s.downSince)))
@@ -89,7 +93,11 @@ func (s *Store) Update(st *Status) {
 	s.trimLocked()
 
 	if prev == nil {
-		s.addEventLocked(st.Time, "start", "monitor started, source: "+st.Source)
+		// A quick restart (deploy, reboot) right after the last stored sample
+		// is not worth an event; only log real monitoring gaps.
+		if lastSample.IsZero() || st.Time.Sub(lastSample) > 10*time.Minute {
+			s.addEventLocked(st.Time, "start", "monitor started, source: "+st.Source)
+		}
 		return
 	}
 	if prev.GridConnected && !st.GridConnected {
