@@ -78,8 +78,10 @@ func (s *Store) Update(st *Status) {
 	defer s.mu.Unlock()
 	prev := s.latest
 	var lastSample time.Time
+	var lastOnGrid bool
 	if n := len(s.samples); n > 0 {
 		lastSample = time.Unix(s.samples[n-1].T, 0)
+		lastOnGrid = s.samples[n-1].OnGrid
 	}
 	s.latest, s.lastErr, s.lastOK, s.dirty = st, "", st.Time, true
 	if s.failures >= failuresBeforeDown {
@@ -97,6 +99,17 @@ func (s *Store) Update(st *Status) {
 		// is not worth an event; only log real monitoring gaps.
 		if lastSample.IsZero() || st.Time.Sub(lastSample) > 10*time.Minute {
 			s.addEventLocked(st.Time, "start", "monitor started, source: "+st.Source)
+		}
+		// The grid may have changed state while the monitor was down (for
+		// example the PC itself lost power during the switch to battery).
+		if !lastSample.IsZero() {
+			window := " (while monitor was down, between " + lastSample.Format("15:04:05") + " and " + st.Time.Format("15:04:05") + ")"
+			if lastOnGrid && !st.GridConnected {
+				s.gridLostAt = lastSample
+				s.addEventLocked(st.Time, "grid_lost", "grid lost, running on "+st.Source+window)
+			} else if !lastOnGrid && st.GridConnected {
+				s.addEventLocked(st.Time, "grid_restored", "grid restored"+window)
+			}
 		}
 		return
 	}
